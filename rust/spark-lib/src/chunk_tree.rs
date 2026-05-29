@@ -321,7 +321,7 @@ pub fn morton_tree<TA: TsplatArray>(splats: &mut TA, root: usize, logger: impl F
         size_limit /= SLICE_FACTOR;
     }
 
-    assert_eq!(indices.len(), splats.len());
+    debug_assert_eq!(indices.len(), splats.len());
     splats.permute(&indices);
 }
 
@@ -401,7 +401,7 @@ pub fn older_chunk_tree<TA: TsplatArray>(splats: &mut TA, root: usize, logger: i
 
     batch_recurse(splats, &mut indices, &[root], &logger);
 
-    assert_eq!(indices.len(), splats.len());
+    debug_assert_eq!(indices.len(), splats.len());
     splats.permute(&indices);
 }
 
@@ -485,7 +485,7 @@ pub fn chunk_tree_size<TA: TsplatArray>(splats: &mut TA, root: usize, logger: im
         }
     }
 
-    assert_eq!(indices.len(), splats.len());
+    debug_assert_eq!(indices.len(), splats.len());
     splats.permute(&indices);
 }
 
@@ -507,7 +507,7 @@ pub fn chunk_tree_only_size<TA: TsplatArray>(splats: &mut TA, root: usize, _logg
         }
     }
 
-    assert_eq!(indices.len(), splats.len());
+    debug_assert_eq!(indices.len(), splats.len());
     splats.permute(&indices);
 }
 
@@ -529,7 +529,7 @@ pub fn chunk_tree_rows<TA: TsplatArray>(splats: &mut TA, root: usize, _logger: i
         }
     }
 
-    assert_eq!(indices.len(), splats.len());
+    debug_assert_eq!(indices.len(), splats.len());
     splats.permute(&indices);
 }
 
@@ -552,7 +552,7 @@ pub fn chunk_tree_dfs<TA: TsplatArray>(splats: &mut TA, root: usize, _logger: im
 
     recurse(splats, &mut indices, root);
 
-    assert_eq!(indices.len(), splats.len());
+    debug_assert_eq!(indices.len(), splats.len());
     splats.permute(&indices);
 }
 
@@ -646,7 +646,7 @@ pub fn chunk_tree_morton<TA: TsplatArray>(splats: &mut TA, root: usize, logger: 
         }
     }
 
-    assert_eq!(indices.len(), splats.len());
+    debug_assert_eq!(indices.len(), splats.len());
     splats.permute(&indices);
 }
 

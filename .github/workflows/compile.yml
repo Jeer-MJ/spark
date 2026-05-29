@@ -1,0 +1,83 @@
+name: "Compile build-lod"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  compile:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "macos-latest"
+            target: "aarch64-apple-darwin"
+            output_name: "build-lod-aarch64-apple-darwin"
+          - platform: "macos-latest"
+            target: "x86_64-apple-darwin"
+            output_name: "build-lod-x86_64-apple-darwin"
+          - platform: "windows-latest"
+            target: "x86_64-pc-windows-msvc"
+            output_name: "build-lod-x86_64-pc-windows-msvc.exe"
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build binary
+        run: |
+          cargo build --release --manifest-path rust/Cargo.toml --bin build-lod --target ${{ matrix.target }}
+
+      - name: Rename binary for Tauri sidecar
+        run: |
+          mkdir -p dist-binaries
+          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
+            mv rust/target/${{ matrix.target }}/release/build-lod.exe dist-binaries/${{ matrix.output_name }}
+          else
+            mv rust/target/${{ matrix.target }}/release/build-lod dist-binaries/${{ matrix.output_name }}
+          fi
+        shell: bash
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output_name }}
+          path: dist-binaries/${{ matrix.output_name }}
+
+  release:
+    needs: compile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten directories
+        run: |
+          mkdir -p upload
+          find artifacts -type f -exec cp {} upload/ \;
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: binaries
+          name: "build-lod Custom Binaries"
+          body: "Ejecutables compilados automáticamente para Tauri Sidecar."
+          draft: false
+          prerelease: false
+          files: upload/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

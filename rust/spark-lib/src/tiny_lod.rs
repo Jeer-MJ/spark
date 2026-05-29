@@ -132,7 +132,10 @@ pub fn compute_lod_tree<SA: TsplatArray>(splats: &mut SA, lod_base: f32, merge_f
         }
     }
 
-    assert_eq!(active.len(), 1);
+    debug_assert_eq!(active.len(), 1, "LOD tree did not converge to a single root");
+    if active.is_empty() {
+        return;
+    }
     let root_index = active[0].0;
     levels_output.push(vec![(usize::MAX, smallvec![root_index])]);
 

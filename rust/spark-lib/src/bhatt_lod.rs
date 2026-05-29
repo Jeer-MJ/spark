@@ -101,12 +101,14 @@ pub fn compute_lod_tree<TA: TsplatArray>(splats: &mut TA, lod_base: f32, logger:
                 // }
 
                 is_active[index] = false;
-                let cell_index = cells.get_mut(&grid).unwrap();
-                cell_index.retain(|x| *x != index);
+                if let Some(cell_index) = cells.get_mut(&grid) {
+                    cell_index.retain(|x| *x != index);
+                }
 
                 is_active[best_neighbor] = false;
-                let cell_best_neighbor = cells.get_mut(&best.2).unwrap();
-                cell_best_neighbor.retain(|x| *x != best_neighbor);
+                if let Some(cell_best_neighbor) = cells.get_mut(&best.2) {
+                    cell_best_neighbor.retain(|x| *x != best_neighbor);
+                }
 
                 is_active.push(true);
 
@@ -239,7 +241,7 @@ pub fn compute_lod_tree<TA: TsplatArray>(splats: &mut TA, lod_base: f32, logger:
         frontier = next_frontier;
     }
 
-    assert_eq!(indices.len(), output_count);
+    debug_assert_eq!(indices.len(), output_count, "bhatt LOD output count mismatch");
 
     for (index, &to_output) in to_output.iter().enumerate() {
         if !to_output {

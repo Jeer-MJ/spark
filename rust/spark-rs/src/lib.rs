@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use js_sys::{Array, Float32Array, Object, Reflect, Uint8Array, Uint16Array, Uint32Array};
 use spark_lib::decoder::{ChunkReceiver, MultiDecoder, SplatEncoding, SplatFileType, SplatGetter};
 use spark_lib::gsplat::GsplatArray as GsplatArrayInner;
+use spark_lib::rad::RadEncoder;
 use spark_lib::csplat::CsplatArray as CsplatArrayInner;
 use spark_lib::tsplat::TsplatArray;
 use wasm_bindgen::prelude::*;
@@ -599,4 +600,59 @@ pub fn decode_rad_header(bytes: Uint8Array) -> Result<JsValue, JsValue> {
     } else {
         Ok(JsValue::null())
     }
+}
+
+/// Convert any supported splat format (PLY, SPZ, SPLAT, KSPLAT, SOG, RAD) to Spark RAD format
+/// with LOD tree baked in. Returns the raw .rad bytes as a Uint8Array.
+///
+/// - `path_hint`: filename or path used for format detection (e.g. "scan.ply").
+/// - `use_bhatt`: true = quality mode (Bhattacharyya LOD, lod_base 1.75),
+///               false = fast mode (Tiny LOD, lod_base 1.5).
+#[wasm_bindgen]
+pub fn convert_to_rad(
+    bytes: Uint8Array,
+    path_hint: Option<String>,
+    use_bhatt: bool,
+) -> Result<Uint8Array, JsValue> {
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_namespace = console, js_name = log)]
+        fn console_log(s: &str);
+    }
+
+    let bytes_vec = bytes.to_vec();
+
+    let file_type = path_hint.as_deref().and_then(SplatFileType::from_pathname);
+
+    console_log(&format!("[mirador3d] convert_to_rad: decoding {} bytes, hint={:?}, use_bhatt={}", bytes_vec.len(), path_hint, use_bhatt));
+
+    let splats = GsplatArrayInner::new();
+    let mut decoder = MultiDecoder::new(splats, file_type, path_hint.as_deref());
+    decoder.push(&bytes_vec).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    decoder.finish().map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let mut splats = decoder.into_splats();
+
+    console_log(&format!("[mirador3d] decoded {} splats", splats.len()));
+
+    if use_bhatt {
+        console_log("[mirador3d] computing bhatt LOD tree (quality mode)...");
+        spark_lib::bhatt_lod::compute_lod_tree(&mut splats, 1.75, |msg| console_log(&format!("[bhatt_lod] {}", msg)));
+    } else {
+        console_log("[mirador3d] computing tiny LOD tree (fast mode)...");
+        spark_lib::tiny_lod::compute_lod_tree(&mut splats, 1.5, false, |msg| console_log(&format!("[tiny_lod] {}", msg)));
+    }
+
+    console_log("[mirador3d] encoding LOD opacity...");
+    splats.encode_lod_opacity();
+
+    console_log("[mirador3d] building chunk tree...");
+    spark_lib::chunk_tree::chunk_tree(&mut splats, 0, |msg| console_log(&format!("[chunk_tree] {}", msg)));
+
+    console_log("[mirador3d] encoding RAD format...");
+    let mut encoder = RadEncoder::new(splats);
+    let mut buf: Vec<u8> = Vec::new();
+    encoder.encode(&mut buf).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    console_log(&format!("[mirador3d] done — output {} bytes", buf.len()));
+    Ok(Uint8Array::from(buf.as_slice()))
 }
