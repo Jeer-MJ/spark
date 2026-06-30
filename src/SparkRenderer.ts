@@ -20,6 +20,7 @@ import {
   isMobile,
   isOculus,
   isVisionPro,
+  uploadU32DataTextureRows,
 } from "./utils";
 
 export interface SparkRendererOptions {
@@ -40,11 +41,6 @@ export interface SparkRendererOptions {
    * @default true
    */
   premultipliedAlpha?: boolean;
-  /**
-   * Whether to encode Gsplat with linear RGB (for environment mapping)
-   * @default false
-   */
-  encodeLinear?: boolean;
   /**
    * Pass in a THREE.Clock to synchronize time-based effects across different
    * systems. Alternatively, you can set the property time directly.
@@ -353,7 +349,6 @@ export class SparkRenderer extends THREE.Mesh {
   falloff: number;
   clipXY: number;
   focalAdjustment: number;
-  encodeLinear: boolean;
 
   sortRadial: boolean;
   minSortIntervalMs: number;
@@ -525,7 +520,6 @@ export class SparkRenderer extends THREE.Mesh {
     this.falloff = options.falloff ?? 1.0;
     this.clipXY = options.clipXY ?? 1.4;
     this.focalAdjustment = options.focalAdjustment ?? 1.0;
-    this.encodeLinear = options.encodeLinear ?? false;
 
     this.sortRadial = options.sortRadial ?? true;
     this.minSortIntervalMs = options.minSortIntervalMs ?? 0;
@@ -567,6 +561,16 @@ export class SparkRenderer extends THREE.Mesh {
     this.accumulators.push(new SplatAccumulator(accumulatorOptions));
     this.accumulators.push(new SplatAccumulator(accumulatorOptions));
 
+    // Check if the provoking vertex convention should be changed
+    const provokingVertexExt = this.renderer
+      .getContext()
+      .getExtension("WEBGL_provoking_vertex");
+    if (provokingVertexExt) {
+      provokingVertexExt.provokingVertexWEBGL(
+        provokingVertexExt.FIRST_VERTEX_CONVENTION_WEBGL,
+      );
+    }
+
     if (options.target) {
       const {
         width,
@@ -602,7 +606,6 @@ export class SparkRenderer extends THREE.Mesh {
           targetOptions,
         );
       }
-      this.encodeLinear = options.encodeLinear ?? true;
     }
   }
 
@@ -731,21 +734,30 @@ export class SparkRenderer extends THREE.Mesh {
     const isNewFrame = frame !== spark.lastFrame;
     spark.lastFrame = frame;
 
-    if (spark.target) {
-      spark.renderSize.set(spark.target.width, spark.target.height);
-    } else {
-      const renderSize = renderer.getDrawingBufferSize(spark.renderSize);
-      if (renderer.xr.isPresenting) {
-        if (renderSize.x === 1 && renderSize.y === 1) {
-          // WebXR mode on Apple Vision Pro returns 1x1 when presenting.
-          // Use a different means to figure out the render size.
-          const baseLayer = renderer.xr.getSession()?.renderState.baseLayer;
-          if (baseLayer) {
-            renderSize.x = baseLayer.framebufferWidth;
-            renderSize.y = baseLayer.framebufferHeight;
-          }
+    // Determine render target
+    const currentRenderTarget = renderer.getRenderTarget();
+    const isXRRenderTarget = checkIsXRRenderTarget(currentRenderTarget);
+    if (currentRenderTarget) {
+      spark.renderSize.set(
+        currentRenderTarget.width,
+        currentRenderTarget.height,
+      );
+
+      // WebXR mode on Apple Vision Pro returns 1x1 when presenting.
+      // Use a different means to figure out the render size.
+      if (
+        isXRRenderTarget &&
+        spark.renderSize.x === 1 &&
+        spark.renderSize.y === 1
+      ) {
+        const baseLayer = renderer.xr.getSession()?.renderState.baseLayer;
+        if (baseLayer) {
+          spark.renderSize.x = baseLayer.framebufferWidth;
+          spark.renderSize.y = baseLayer.framebufferHeight;
         }
       }
+    } else {
+      renderer.getDrawingBufferSize(spark.renderSize);
     }
     this.uniforms.renderSize.value.copy(spark.renderSize);
 
@@ -787,7 +799,15 @@ export class SparkRenderer extends THREE.Mesh {
     this.uniforms.falloff.value = spark.falloff;
     this.uniforms.clipXY.value = spark.clipXY;
     this.uniforms.focalAdjustment.value = spark.focalAdjustment;
-    this.uniforms.encodeLinear.value = spark.encodeLinear;
+
+    const outputColorSpace =
+      currentRenderTarget === null
+        ? renderer.outputColorSpace
+        : isXRRenderTarget
+          ? currentRenderTarget.texture.colorSpace
+          : THREE.ColorManagement.workingColorSpace;
+    this.uniforms.encodeLinear.value =
+      outputColorSpace !== THREE.SRGBColorSpace;
 
     this.uniforms.ordering.value =
       spark.orderingTexture ?? SparkRenderer.emptyOrdering;
@@ -1065,34 +1085,16 @@ export class SparkRenderer extends THREE.Mesh {
       this.orderingTexture = orderingTexture;
     } else {
       const renderer = this.renderer;
-      const gl = renderer.getContext() as WebGL2RenderingContext;
       if (!renderer.properties.has(this.orderingTexture)) {
         this.orderingTexture.needsUpdate = true;
       } else {
-        const props = renderer.properties.get(this.orderingTexture) as {
-          __webglTexture: WebGLTexture;
-        };
-        const glTexture = props.__webglTexture;
-        if (!glTexture) {
-          throw new Error("ordering texture not found");
-        }
-        renderer.state.activeTexture(gl.TEXTURE0);
-        renderer.state.bindTexture(gl.TEXTURE_2D, glTexture);
-        gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-        gl.texSubImage2D(
-          gl.TEXTURE_2D,
-          0,
-          0,
-          0,
+        uploadU32DataTextureRows(
+          renderer,
+          this.orderingTexture,
           4096,
           rows,
-          gl.RGBA_INTEGER,
-          gl.UNSIGNED_INT,
-          // data,
           result.ordering,
         );
-        renderer.state.bindTexture(gl.TEXTURE_2D, null);
       }
     }
 
@@ -2096,4 +2098,8 @@ export class SparkRenderer extends THREE.Mesh {
       this.material.needsUpdate = true;
     }
   }
+}
+
+function checkIsXRRenderTarget(renderTarget: THREE.RenderTarget | null) {
+  return (renderTarget as unknown as Record<string, boolean>)?.isXRRenderTarget;
 }
